@@ -1,0 +1,14 @@
+# Virtual Environment
+.venv/
+
+# Python Cache
+__pycache__/
+*.py[cod]
+
+# Large Data & Datasets
+my_dataset.zip
+uploads/
+
+# Model Files
+*.h5
+model_ai_artbench_run.h5
