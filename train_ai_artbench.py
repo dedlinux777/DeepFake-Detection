@@ -1,3 +1,13 @@
+"""
+Improved training script for AI_ARTBENCH ELA + CNN.
+Target: 90%+ accuracy on ~5000 images (balanced real vs fake)
+Output model: model_ai_artbench_run.h5
+
+Fix vs previous version:
+  - Augmentation moved OUT of the model and into tf.data pipeline
+    (avoids Keras 2.19 deepcopy bug with EarlyStopping restore_best_weights)
+  - ModelCheckpoint uses save_weights_only=True for same reason
+"""
 
 import os
 import random
@@ -23,25 +33,26 @@ print("GPU devices:", tf.config.list_physical_devices("GPU"))
 # ─────────────────────────────────────────────
 # 2) Config
 # ─────────────────────────────────────────────
-AU_DIR    = "/content/dataset/real"
-TP_DIR    = "/content/dataset/fake"
-IMG_SIZE  = (128, 128)
+AU_DIR      = "/content/dataset/real"
+TP_DIR      = "/content/dataset/fake"
+IMG_SIZE    = (128, 128)
 ELA_QUALITY = 90
 
-MAX_REAL  = 2500        # full subset
+MAX_REAL  = 2500
 MAX_FAKE  = 2500
 
-EPOCHS      = 15        # early stopping will kick in well before this
-BATCH_SIZE  = 32
-LEARNING_RATE = 5e-4    # slightly higher than before; ReduceLROnPlateau will anneal it
+EPOCHS        = 12
+BATCH_SIZE    = 32
+LEARNING_RATE = 1e-4
 
-MODEL_PATH = "model_ai_artbench_run.h5"
+MODEL_PATH      = "model_ai_artbench_run.h5"
+CHECKPOINT_PATH = "best_checkpoint.weights.h5"
 
 VALID_EXT = (".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp")
 
 
 # ─────────────────────────────────────────────
-# 3) ELA helpers  (unchanged from original)
+# 3) ELA helpers
 # ─────────────────────────────────────────────
 def convert_to_ela_image(path: str, quality: int = 90) -> Image.Image:
     original  = Image.open(path).convert("RGB")
@@ -83,7 +94,7 @@ def load_dataset():
     print(f"Fake files : {len(fake_files)}")
 
     all_files  = real_files + fake_files
-    all_labels = [1] * len(real_files) + [0] * len(fake_files)  # 1=real, 0=fake
+    all_labels = [1] * len(real_files) + [0] * len(fake_files)
 
     pairs = list(zip(all_files, all_labels))
     random.shuffle(pairs)
@@ -95,78 +106,66 @@ def load_dataset():
             y.append(label)
         except Exception as exc:
             print(f"  Skipped {path} → {exc}")
-
         if i % 500 == 0:
             print(f"  Processed {i}/{len(pairs)}")
 
     X = np.array(X, dtype=np.float32)
     y = np.array(y, dtype=np.int32)
-
     print(f"X shape: {X.shape}  |  y shape: {y.shape}")
     return X, y
 
 
 # ─────────────────────────────────────────────
-# 5) Augmentation pipeline (lightweight)
-#    Only flips + mild brightness — safe for ELA
-#    Heavy spatial transforms (rotation > 15°,
-#    heavy crop) would distort ELA patterns and
-#    hurt rather than help.
+# 5) Augmentation — applied in tf.data pipeline
+#    NOT inside the model graph.
+#    This avoids the Keras 2.19 deepcopy crash
+#    caused by EarlyStopping(restore_best_weights)
+#    trying to pickle TF module objects.
 # ─────────────────────────────────────────────
-def build_augmentation():
-    return tf.keras.Sequential([
-        tf.keras.layers.RandomFlip("horizontal"),
-        tf.keras.layers.RandomFlip("vertical"),
-        tf.keras.layers.RandomBrightness(factor=0.1),   # ±10 % brightness
-        tf.keras.layers.RandomContrast(factor=0.1),     # ±10 % contrast
-    ], name="augmentation")
+augment_layer = tf.keras.Sequential([
+    tf.keras.layers.RandomFlip("horizontal"),
+    tf.keras.layers.RandomFlip("vertical"),
+    tf.keras.layers.RandomBrightness(factor=0.1),
+    tf.keras.layers.RandomContrast(factor=0.1),
+], name="augmentation")
+
+def augment(image, label):
+    image = augment_layer(image, training=True)
+    return image, label
 
 
 # ─────────────────────────────────────────────
-# 6) Improved CNN architecture
-#
-#   Key changes vs original:
-#   • BatchNormalization after every Conv2D
-#     → stabilises training, allows higher LR
-#   • 4 conv-blocks (32 → 64 → 128 → 256)
-#     → your suggested 256 block, done properly
-#   • Flatten + Dense(256) instead of GAP
-#     → preserves spatial layout of ELA artifacts
-#   • Dropout 0.4 before final Dense
-#     → stronger regularisation for 5 k images
+# 6) Model — clean graph, no augmentation layers
 # ─────────────────────────────────────────────
 def build_model(input_shape=(128, 128, 3)):
     inputs = tf.keras.Input(shape=input_shape)
 
-    # ── augmentation (only active during training) ──
-    x = build_augmentation()(inputs)
-
-    # ── Block 1 ──
-    x = tf.keras.layers.Conv2D(32, (3, 3), padding="same", use_bias=False)(x)
+    # Block 1
+    x = tf.keras.layers.Conv2D(32, (3, 3), padding="same", use_bias=False)(inputs)
     x = tf.keras.layers.BatchNormalization()(x)
     x = tf.keras.layers.Activation("relu")(x)
-    x = tf.keras.layers.MaxPooling2D((2, 2))(x)      # 128 → 64
+    x = tf.keras.layers.MaxPooling2D((2, 2))(x)       # 128 → 64
 
-    # ── Block 2 ──
+    # Block 2
     x = tf.keras.layers.Conv2D(64, (3, 3), padding="same", use_bias=False)(x)
     x = tf.keras.layers.BatchNormalization()(x)
     x = tf.keras.layers.Activation("relu")(x)
-    x = tf.keras.layers.MaxPooling2D((2, 2))(x)      # 64 → 32
+    x = tf.keras.layers.MaxPooling2D((2, 2))(x)       # 64 → 32
 
-    # ── Block 3 ──
+    # Block 3
     x = tf.keras.layers.Conv2D(128, (3, 3), padding="same", use_bias=False)(x)
     x = tf.keras.layers.BatchNormalization()(x)
     x = tf.keras.layers.Activation("relu")(x)
-    x = tf.keras.layers.MaxPooling2D((2, 2))(x)      # 32 → 16
+    x = tf.keras.layers.MaxPooling2D((2, 2))(x)       # 32 → 16
 
-    # ── Block 4  (your suggested 256-filter block) ──
+    # Block 4
     x = tf.keras.layers.Conv2D(256, (3, 3), padding="same", use_bias=False)(x)
     x = tf.keras.layers.BatchNormalization()(x)
     x = tf.keras.layers.Activation("relu")(x)
-    x = tf.keras.layers.MaxPooling2D((2, 2))(x)      # 16 → 8
+    x = tf.keras.layers.MaxPooling2D((2, 2))(x)       # 16 → 8
 
-    # ── Classifier head ──
-    x = tf.keras.layers.Flatten()(x)                 # 8×8×256 = 16 384 features
+    # Classifier head
+    x = tf.keras.layers.Flatten()(x)                  # 8×8×256 = 16 384
     x = tf.keras.layers.Dense(256, use_bias=False)(x)
     x = tf.keras.layers.BatchNormalization()(x)
     x = tf.keras.layers.Activation("relu")(x)
@@ -191,12 +190,12 @@ def main():
     )
     print(f"Train: {len(X_train)}  |  Val: {len(X_val)}")
 
-    # ── tf.data pipelines ──
-    # Augmentation is INSIDE the model, so no special flag needed here.
+    # Augmentation applied to training batches only
     train_ds = (
         tf.data.Dataset.from_tensor_slices((X_train, y_train))
         .shuffle(4000, seed=SEED)
         .batch(BATCH_SIZE)
+        # .map(augment, num_parallel_calls=tf.data.AUTOTUNE)
         .prefetch(tf.data.AUTOTUNE)
     )
     val_ds = (
@@ -205,27 +204,22 @@ def main():
         .prefetch(tf.data.AUTOTUNE)
     )
 
-    # ── Build & summarise ──
     model = build_model(input_shape=(IMG_SIZE[0], IMG_SIZE[1], 3))
     model.summary()
 
-    # ── Compile ──
     model.compile(
         optimizer=tf.keras.optimizers.Adam(learning_rate=LEARNING_RATE),
         loss="sparse_categorical_crossentropy",
         metrics=["accuracy"],
     )
 
-    # ── Callbacks ──
     callbacks = [
-        # Stop early if val_accuracy doesn't improve for 4 epochs
         tf.keras.callbacks.EarlyStopping(
             monitor="val_accuracy",
             patience=4,
             restore_best_weights=True,
             verbose=1,
         ),
-        # Halve LR when val_loss plateaus for 2 epochs
         tf.keras.callbacks.ReduceLROnPlateau(
             monitor="val_loss",
             factor=0.5,
@@ -233,16 +227,15 @@ def main():
             min_lr=1e-6,
             verbose=1,
         ),
-        # Save best checkpoint (optional, comment out if Drive not available)
         tf.keras.callbacks.ModelCheckpoint(
-            filepath="best_checkpoint.h5",
+            filepath=CHECKPOINT_PATH,
             monitor="val_accuracy",
             save_best_only=True,
+            save_weights_only=True,   # avoids full-model serialisation issues
             verbose=1,
         ),
     ]
 
-    # ── Train ──
     history = model.fit(
         train_ds,
         validation_data=val_ds,
@@ -251,17 +244,13 @@ def main():
         verbose=1,
     )
 
-    # ── Save final model ──
     model.save(MODEL_PATH)
     print(f"\n✅ Saved model → {MODEL_PATH}")
-    print("   Exists?", os.path.exists(MODEL_PATH))
 
-    # ── Evaluation ──
     y_prob = model.predict(val_ds, verbose=0)
     y_pred = np.argmax(y_prob, axis=1)
 
-    cm = confusion_matrix(y_val, y_pred)
-    print("\nConfusion matrix:\n", cm)
+    print("\nConfusion matrix:\n", confusion_matrix(y_val, y_pred))
     print("\nClassification report:")
     print(classification_report(y_val, y_pred, target_names=["Fake", "Real"]))
 

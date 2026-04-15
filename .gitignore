@@ -10,5 +10,5 @@ my_dataset.zip
 uploads/
 
 # Model Files
-*.h5
-model_ai_artbench_run.h5
+#*.h5
+#model_ai_artbench_run.h5
