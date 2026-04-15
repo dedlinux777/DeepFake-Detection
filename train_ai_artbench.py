@@ -11,8 +11,10 @@ Fix vs previous version:
 
 import os
 import random
+import json
 import numpy as np
 import tensorflow as tf
+import matplotlib.pyplot as plt
 from PIL import Image, ImageChops, ImageEnhance
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import confusion_matrix, classification_report
@@ -47,6 +49,10 @@ LEARNING_RATE = 1e-4
 
 MODEL_PATH      = "model_ai_artbench_run.h5"
 CHECKPOINT_PATH = "best_checkpoint.weights.h5"
+METRICS_PATH    = "metrics.json"
+STATIC_DIR      = "static"
+TRAINING_CURVE_PATH = os.path.join(STATIC_DIR, "training_curve.png")
+CONFUSION_MATRIX_PATH = os.path.join(STATIC_DIR, "confusion_matrix.png")
 
 VALID_EXT = (".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp")
 
@@ -176,10 +182,65 @@ def build_model(input_shape=(128, 128, 3)):
     return tf.keras.Model(inputs, outputs, name="detectify_v2")
 
 
+def plot_training_curves(history_dict: dict, output_path: str):
+    epochs = range(1, len(history_dict["accuracy"]) + 1)
+    plt.figure(figsize=(10, 4))
+
+    plt.subplot(1, 2, 1)
+    plt.plot(epochs, history_dict["accuracy"], label="Train Accuracy")
+    plt.plot(epochs, history_dict["val_accuracy"], label="Validation Accuracy")
+    plt.xlabel("Epoch")
+    plt.ylabel("Accuracy")
+    plt.title("Accuracy vs Epochs")
+    plt.legend()
+    plt.grid(alpha=0.2)
+
+    plt.subplot(1, 2, 2)
+    plt.plot(epochs, history_dict["loss"], label="Train Loss")
+    plt.plot(epochs, history_dict["val_loss"], label="Validation Loss")
+    plt.xlabel("Epoch")
+    plt.ylabel("Loss")
+    plt.title("Loss vs Epochs")
+    plt.legend()
+    plt.grid(alpha=0.2)
+
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=150)
+    plt.close()
+
+
+def plot_conf_matrix(cm: np.ndarray, output_path: str):
+    plt.figure(figsize=(5, 4))
+    plt.imshow(cm, interpolation="nearest", cmap=plt.cm.Blues)
+    plt.title("Confusion Matrix")
+    plt.colorbar()
+    tick_marks = np.arange(2)
+    class_names = ["Fake", "Real"]
+    plt.xticks(tick_marks, class_names)
+    plt.yticks(tick_marks, class_names)
+    plt.xlabel("Predicted Label")
+    plt.ylabel("True Label")
+
+    thresh = cm.max() / 2.0 if cm.size else 0
+    for i in range(cm.shape[0]):
+        for j in range(cm.shape[1]):
+            plt.text(
+                j, i, format(cm[i, j], "d"),
+                ha="center",
+                color="white" if cm[i, j] > thresh else "black"
+            )
+
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=150)
+    plt.close()
+
+
 # ─────────────────────────────────────────────
 # 7) Training entry point
 # ─────────────────────────────────────────────
 def main():
+    os.makedirs(STATIC_DIR, exist_ok=True)
+
     X, y = load_dataset()
 
     X_train, X_val, y_train, y_val = train_test_split(
@@ -250,9 +311,36 @@ def main():
     y_prob = model.predict(val_ds, verbose=0)
     y_pred = np.argmax(y_prob, axis=1)
 
-    print("\nConfusion matrix:\n", confusion_matrix(y_val, y_pred))
+    cm = confusion_matrix(y_val, y_pred)
+    print("\nConfusion matrix:\n", cm)
     print("\nClassification report:")
-    print(classification_report(y_val, y_pred, target_names=["Fake", "Real"]))
+    report_text = classification_report(y_val, y_pred, target_names=["Fake", "Real"])
+    report_dict = classification_report(
+        y_val, y_pred, target_names=["Fake", "Real"], output_dict=True
+    )
+    print(report_text)
+
+    metrics_payload = {
+        "accuracy": float(report_dict["accuracy"]),
+        "precision": float(report_dict["weighted avg"]["precision"]),
+        "recall": float(report_dict["weighted avg"]["recall"]),
+        "f1_score": float(report_dict["weighted avg"]["f1-score"]),
+        "confusion_matrix": cm.tolist(),
+        "train_accuracy": [float(v) for v in history.history["accuracy"]],
+        "val_accuracy": [float(v) for v in history.history["val_accuracy"]],
+        "train_loss": [float(v) for v in history.history["loss"]],
+        "val_loss": [float(v) for v in history.history["val_loss"]],
+    }
+
+    with open(METRICS_PATH, "w", encoding="utf-8") as fp:
+        json.dump(metrics_payload, fp, indent=2)
+    print(f"\n✅ Saved metrics → {METRICS_PATH}")
+
+    plot_training_curves(history.history, TRAINING_CURVE_PATH)
+    print(f"✅ Saved training curve → {TRAINING_CURVE_PATH}")
+
+    plot_conf_matrix(cm, CONFUSION_MATRIX_PATH)
+    print(f"✅ Saved confusion matrix plot → {CONFUSION_MATRIX_PATH}")
 
     print("\nFinal epoch metrics:")
     print("  train_acc :", round(float(history.history["accuracy"][-1]),  4))

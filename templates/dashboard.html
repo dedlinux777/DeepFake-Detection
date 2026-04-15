@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Model Performance Dashboard</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: #f4f6f8;
+            color: #1f2937;
+        }
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+        .card {
+            background: #ffffff;
+            border-radius: 10px;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        h1, h2 {
+            margin-top: 0;
+        }
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 12px;
+        }
+        .metric-item {
+            background: #f9fafb;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            padding: 12px;
+        }
+        img {
+            width: 100%;
+            border-radius: 8px;
+            border: 1px solid #e5e7eb;
+        }
+        .actions a {
+            text-decoration: none;
+            background: #2563eb;
+            color: #fff;
+            padding: 10px 14px;
+            border-radius: 6px;
+            display: inline-block;
+            margin-right: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="actions">
+            <a href="/">Back to Detector</a>
+        </div>
+
+        <div class="card">
+            <h1>Model Performance Dashboard</h1>
+            {% if metrics %}
+                <div class="metrics-grid">
+                    <div class="metric-item"><strong>Accuracy:</strong> {{ "%.4f"|format(metrics.accuracy) }}</div>
+                    <div class="metric-item"><strong>Precision:</strong> {{ "%.4f"|format(metrics.precision) }}</div>
+                    <div class="metric-item"><strong>Recall:</strong> {{ "%.4f"|format(metrics.recall) }}</div>
+                    <div class="metric-item"><strong>F1-score:</strong> {{ "%.4f"|format(metrics.f1_score) }}</div>
+                </div>
+            {% else %}
+                <p>metrics.json not found. Please run training first to generate metrics and plots.</p>
+            {% endif %}
+        </div>
+
+        {% if metrics %}
+            <div class="card">
+                <h2>Confusion Matrix</h2>
+                <img src="{{ url_for('static', filename=confusion_matrix_image) }}" alt="Confusion Matrix">
+            </div>
+
+            <div class="card">
+                <h2>Training Curve</h2>
+                <img src="{{ url_for('static', filename=training_curve_image) }}" alt="Training Curve">
+            </div>
+
+            <div class="card">
+                <h2>Comparison with IEEE Paper</h2>
+                <img src="{{ url_for('static', filename=comparison_image) }}" alt="Comparison Graph">
+            </div>
+        {% endif %}
+    </div>
+</body>
+</html>

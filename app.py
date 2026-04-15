@@ -1,7 +1,9 @@
 from flask import Flask, render_template, request
 from flask_ngrok import run_with_ngrok
 import os
+import json
 import numpy as np
+import matplotlib.pyplot as plt
 from PIL import Image, ImageChops, ImageEnhance
 from tensorflow import keras
 
@@ -13,6 +15,7 @@ app = Flask(__name__)
 # =========================
 os.makedirs('uploads', exist_ok=True)
 os.makedirs('static/ela_images', exist_ok=True)
+os.makedirs('static', exist_ok=True)
 
 # =========================
 # MODEL PATH
@@ -20,6 +23,8 @@ os.makedirs('static/ela_images', exist_ok=True)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_FILENAME = 'model_ai_artbench_run.h5'   # ✅ YOUR MODEL
 MODEL_PATH = os.path.join(BASE_DIR, MODEL_FILENAME)
+METRICS_PATH = os.path.join(BASE_DIR, "metrics.json")
+COMPARISON_PATH = os.path.join(BASE_DIR, "static", "comparison.png")
 
 print("=" * 60)
 print("MODEL PATH:", MODEL_PATH)
@@ -31,6 +36,38 @@ print("=" * 60)
 # =========================
 model = keras.models.load_model(MODEL_PATH)
 print("✅ Model loaded successfully!")
+
+
+def load_metrics():
+    if not os.path.exists(METRICS_PATH):
+        return None
+
+    with open(METRICS_PATH, "r", encoding="utf-8") as fp:
+        return json.load(fp)
+
+
+def ensure_comparison_chart(my_model_accuracy: float):
+    labels = ["Baseline CNN", "My Model", "IEEE Paper"]
+    values = [0.92, my_model_accuracy, 0.99]
+    colors = ["#f39c12", "#3498db", "#2ecc71"]
+
+    plt.figure(figsize=(8, 4.5))
+    bars = plt.bar(labels, values, color=colors)
+    plt.ylim(0.0, 1.05)
+    plt.ylabel("Accuracy")
+    plt.title("Accuracy Comparison")
+
+    for bar, value in zip(bars, values):
+        plt.text(
+            bar.get_x() + bar.get_width() / 2,
+            value + 0.01,
+            f"{value:.2f}",
+            ha="center"
+        )
+
+    plt.tight_layout()
+    plt.savefig(COMPARISON_PATH, dpi=150)
+    plt.close()
 
 # =========================
 # ROUTE
@@ -62,7 +99,22 @@ def index():
         ela_image_path=ela_image_path,
         confidence=confidence,
         result=result,
-        error=error
+        error=error,
+    )
+
+
+@app.route('/dashboard')
+def dashboard():
+    metrics = load_metrics()
+    if metrics and "accuracy" in metrics:
+        ensure_comparison_chart(float(metrics["accuracy"]))
+
+    return render_template(
+        'dashboard.html',
+        metrics=metrics,
+        confusion_matrix_image='confusion_matrix.png',
+        training_curve_image='training_curve.png',
+        comparison_image='comparison.png'
     )
 
 # =========================
