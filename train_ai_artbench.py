@@ -50,7 +50,7 @@ LEARNING_RATE = 1e-4
 MODEL_PATH      = "model_ai_artbench_run.h5"
 CHECKPOINT_PATH = "best_checkpoint.weights.h5"
 METRICS_PATH    = "metrics.json"
-STATIC_DIR      = "static"
+STATIC_DIR = "/content/drive/MyDrive/your_project/static"
 TRAINING_CURVE_PATH = os.path.join(STATIC_DIR, "training_curve.png")
 CONFUSION_MATRIX_PATH = os.path.join(STATIC_DIR, "confusion_matrix.png")
 

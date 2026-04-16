@@ -4,8 +4,8 @@
     <meta charset="UTF-8">
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Detectify - Fake Image Detection</title>
-    
+    <title>Detectify - AI Art Detection</title>
+
     <style>
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -179,7 +179,7 @@
       </script>
     </div>  
     <header>
-        <h1>Detectify - Fake Image Detection</h1>
+        <h1>Detectify - AI Art Detection</h1>
         <p><a href="{{ url_for('dashboard') }}" style="color: #fff;">Open Model Performance Dashboard</a></p>
     </header>
     
@@ -194,12 +194,17 @@
             <button type="submit">Submit</button>
         </form>
 
+        {% if uploaded_image_path %}
+            <h2>Submitted Image:</h2>
+            <img src="{{ uploaded_image_path }}" alt="Submitted Image">
+        {% endif %}
+
         {% if ela_image_path %}
             <h2>ELA Image:</h2>
             <img src="{{ ela_image_path }}" alt="ELA Image">
 
             {% if result %}
-                <h2>Result:</h2>
+                <h2>Classification:</h2>
                 <p class="confidence">Confidence: {{ confidence }}%</p>
                 <p class="result">{{ result }}</p>
             {% endif %}
